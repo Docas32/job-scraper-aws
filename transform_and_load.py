@@ -1,19 +1,40 @@
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 BASE_DIR = Path(__file__).parent
 RAW_JOBS_FILE = BASE_DIR / "raw_jobs.json"
-DATABASE_FILE = BASE_DIR / "jobs.db"
-DATABASE_URL = f"sqlite:///{DATABASE_FILE.as_posix()}"
 
+# Carrega as variáveis do arquivo .env para o ambiente
+load_dotenv(BASE_DIR / ".env")
+
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME")
+
+# Validação simples pra falhar rápido caso o .env esteja incompleto
+if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
+    raise EnvironmentError(
+        "Variáveis de ambiente do banco não encontradas. Confira se o arquivo .env existe "
+        "e contém DB_USER, DB_PASSWORD, DB_HOST, DB_PORT e DB_NAME."
+    )
+
+DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# --- Sintaxe adaptada para PostgreSQL ---
+# UNIQUE já é implícito em PRIMARY KEY, mas deixei explícito para reforçar a intenção
+# de que 'link' é a chave usada para evitar duplicatas.
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS vagas (
-    link TEXT PRIMARY KEY UNIQUE NOT NULL,
+    link TEXT PRIMARY KEY NOT NULL,
     titulo TEXT,
     empresa TEXT,
     localizacao TEXT,
@@ -23,8 +44,11 @@ CREATE TABLE IF NOT EXISTS vagas (
 )
 """
 
+# No SQLite usávamos "INSERT OR IGNORE". No Postgres, o equivalente é
+# "ON CONFLICT (coluna) DO NOTHING", que exige que a coluna tenha uma
+# UNIQUE constraint ou seja PRIMARY KEY (que já é o nosso caso, com 'link').
 INSERT_SQL = """
-INSERT OR IGNORE INTO vagas (
+INSERT INTO vagas (
     link,
     titulo,
     empresa,
@@ -41,6 +65,7 @@ INSERT OR IGNORE INTO vagas (
     :salario_max,
     :data_extracao
 )
+ON CONFLICT (link) DO NOTHING
 """
 
 
@@ -146,7 +171,7 @@ def main() -> None:
 
     print(f"Processadas {len(df)} vagas do arquivo JSON.")
     print(f"Inseridas: {inserted} | Ignoradas (duplicadas): {ignored}")
-    print(f"Banco salvo em: {DATABASE_FILE}")
+    print(f"Banco de dados: {DB_HOST}/{DB_NAME}")
 
 
 if __name__ == "__main__":
