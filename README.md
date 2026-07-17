@@ -168,7 +168,6 @@ Documentar esses erros aqui é intencional — eles refletem decisões de arquit
 
 ## 9. Limitações conhecidas e próximos passos
 
-- **Feedback via IA está mockado**: a integração real com um LLM para gerar insights sobre as vagas coletadas é um item de escopo futuro, ainda não implementado.
 - **IP dinâmico para acesso local**: dependência de atualização manual da regra de Security Group sempre que o IP residencial muda — não é um problema em produção (a task do ECS usa a regra de VPC interna), mas afeta o fluxo de desenvolvimento/debug local.
 - **Sem Secrets Manager**: credenciais do banco trafegam como variáveis de ambiente em texto puro na Task Definition do ECS — funcional, mas não é a prática recomendada para um ambiente além de portfólio/estudo.
 - **Sem Multi-AZ / alta disponibilidade**: aceitável para o escopo atual (projeto individual, Free Tier), mas seria um ponto a revisar caso o projeto evolua para um cenário com requisito de disponibilidade real.
