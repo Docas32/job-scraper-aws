@@ -63,6 +63,7 @@ graph TD
     P2 -->|3. Consome e Trata| P3
     P3 -->|4. Injeta Dados| RDS
     RDS -->|5. Exibe Dados| ST
+```
 - **Por quê essa mudança em relação à versão SQLite**: o pipeline original usava `INSERT OR IGNORE`, sintaxe específica do SQLite que não existe no PostgreSQL. `ON CONFLICT (coluna) DO NOTHING` é o equivalente direto no Postgres, e depende de uma constraint `UNIQUE`/`PRIMARY KEY` na coluna usada como critério de conflito — por isso `link` (que identifica unicamente cada vaga) foi mantido como chave primária também no schema Postgres.
 - **Alternativa descartada**: usar `pandas.to_sql(..., if_exists='append')` puro — rejeitada porque o `to_sql` do Pandas não tem suporte nativo a `ON CONFLICT`; ele geraria erro de violação de chave primária a cada linha duplicada, em vez de simplesmente ignorá-la. A solução adotada usa SQLAlchemy diretamente (`connection.execute`) para ter controle total sobre a sintaxe do INSERT.
 
