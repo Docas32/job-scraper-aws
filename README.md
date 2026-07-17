@@ -40,21 +40,21 @@ graph TD
     classDef external fill:#FF4B4B,stroke:#333,stroke-width:1px,color:#fff;
 
     %% Componentes da Orquestração e Imagem
-    subgraph Orquestração & Infraestrutura
-        EB[EventBridge Scheduler<br><i>Dispara 1x/dia, 8h BRT</i>]:::awsEvent
-        ECR[Amazon ECR<br><i>job-scraper-repo:latest</i>]:::awsCompute
+    subgraph Orc ["Orquestração & Infraestrutura"]
+        EB["EventBridge Scheduler<br><i>Dispara 1x/dia, 8h BRT</i>"]:::awsEvent
+        ECR["Amazon ECR<br><i>job-scraper-repo:latest</i>"]:::awsCompute
     end
 
     %% Componentes do Core da Task
-    subgraph ECS Fargate Task (Container Efêmero)
-        P1[1. Scraper<br><i>Playwright Python</i>]:::awsCompute
-        P2(2. raw_jobs.json<br><i>Dados Brutos</i>):::awsStorage
-        P3[3. transform_and_load.py<br><i>Pandas / SQLAlchemy</i>]:::awsCompute
+    subgraph Fargate ["ECS Fargate Task (Container Efêmero)"]
+        P1["1. Scraper<br><i>Playwright Python</i>"]:::awsCompute
+        P2["2. raw_jobs.json<br><i>Dados Brutos</i>"]:::awsStorage
+        P3["3. transform_and_load.py<br><i>Pandas / SQLAlchemy</i>"]:::awsCompute
     end
 
     %% Destinos Finais
-    RDS[(4. Amazon RDS PostgreSQL<br><i>Tabela: vagas</i>)]:::awsDatabase
-    ST[5. Streamlit App<br><i>Dashboard Público</i>]:::external
+    RDS[("4. Amazon RDS PostgreSQL<br><i>Tabela: vagas</i>")]:::awsDatabase
+    ST["5. Streamlit App<br><i>Dashboard Público</i>"]:::external
 
     %% Relacionamentos do Fluxo
     EB -->|1. Dispara Task| P1
@@ -63,41 +63,6 @@ graph TD
     P2 -->|3. Consome e Trata| P3
     P3 -->|4. Injeta Dados| RDS
     RDS -->|5. Exibe Dados| ST
-
-Um bucket **S3** também faz parte do projeto, reservado para armazenamento de arquivos JSON (ex: cópias do `raw_jobs.json` ou backups), com acesso público bloqueado por padrão.
-
----
-
-## 3. Decisões técnicas e a razão de cada uma
-
-### 3.1 Armazenamento bruto — Amazon S3
-
-- **Decisão**: bucket S3 dedicado, com **"Block all public access" ativado**.
-- **Por quê**: arquivos JSON não precisam de acesso público — bloquear tudo por padrão elimina o risco (e o custo de risco) de exposição acidental de dados ou de tráfego de saída não autorizado cobrado pela AWS. Seguimos o princípio de *least privilege* desde o primeiro recurso criado no projeto.
-- **Alternativa descartada**: deixar o bucket com ACLs ou política pública para "facilitar" — rejeitada porque não há necessidade real de acesso externo direto aos arquivos brutos.
-
-### 3.2 Banco de dados — Amazon RDS PostgreSQL (Free Tier)
-
-- **Decisão**: instância `db.t3.micro` (ou `db.t4g.micro`), engine PostgreSQL, camada Free Tier, storage gp2 de 20 GB, Single-AZ.
-- **Por quê PostgreSQL em vez de manter SQLite**: SQLite é um arquivo local — não sobrevive à natureza efêmera de containers (cada execução do Fargate roda em um filesystem novo, descartado ao final). Um banco gerenciado e persistente fora do container era obrigatório assim que o pipeline passou a rodar de forma agendada e containerizada.
-- **Por quê Free Tier / instância pequena**: o volume de dados (vagas de emprego, texto curto, sem imagens/binários) é baixo, então uma instância burstable pequena atende com folga, sem custo mensal recorrente.
-- **Nome do banco `jobs_db`**: definido explicitamente no campo "Initial database name" na criação — atenção documentada aqui porque, na prática, esse campo foi deixado em branco na primeira tentativa, exigindo criação manual do banco via `CREATE DATABASE` depois (ver seção 8, "Erros encontrados").
-
-### 3.3 Segurança de rede — Security Groups
-
-- **Decisão**: duas regras de entrada na porta 5432, ambas explícitas — nunca `0.0.0.0/0` (aberto ao mundo):
-  1. `172.31.0.0/16` — libera o tráfego **interno da VPC padrão**, necessário para a task do ECS Fargate (que roda dentro dessa VPC) conseguir conectar no banco.
-  2. `SEU_IP/32` — libera o IP público residencial do desenvolvedor, para testes locais via Python.
-- **Por quê não abrir `0.0.0.0/0`**: exporia a porta do banco a qualquer host na internet tentando força bruta de senha — inaceitável mesmo em ambiente de estudo/portfólio.
-- **Trade-off conhecido**: como o IP residencial usado para desenvolvimento é dinâmico, a regra `/32` precisa ser atualizada manualmente sempre que o IP muda (situação enfrentada repetidas vezes durante o desenvolvimento). Isso é aceitável para uso individual, mas não escalaria para uma equipe — nesse cenário, o caminho recomendado seria acesso via VPN/Bastion Host em vez de IP direto.
-
-### 3.4 Deduplicação — `UNIQUE` constraint + `ON CONFLICT DO NOTHING`
-
-- **Decisão**: a coluna `link` é `PRIMARY KEY` na tabela `vagas`. A inserção usa:
-  ```sql
-  INSERT INTO vagas (...) VALUES (...)
-  ON CONFLICT (link) DO NOTHING
-  ```
 - **Por quê essa mudança em relação à versão SQLite**: o pipeline original usava `INSERT OR IGNORE`, sintaxe específica do SQLite que não existe no PostgreSQL. `ON CONFLICT (coluna) DO NOTHING` é o equivalente direto no Postgres, e depende de uma constraint `UNIQUE`/`PRIMARY KEY` na coluna usada como critério de conflito — por isso `link` (que identifica unicamente cada vaga) foi mantido como chave primária também no schema Postgres.
 - **Alternativa descartada**: usar `pandas.to_sql(..., if_exists='append')` puro — rejeitada porque o `to_sql` do Pandas não tem suporte nativo a `ON CONFLICT`; ele geraria erro de violação de chave primária a cada linha duplicada, em vez de simplesmente ignorá-la. A solução adotada usa SQLAlchemy diretamente (`connection.execute`) para ter controle total sobre a sintaxe do INSERT.
 
